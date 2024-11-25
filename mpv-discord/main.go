@@ -44,34 +44,16 @@ func getActivity() (activity discordrpc.Activity, err error) {
 	}
 
 	// Details
-	activity.Details = getPropertyString("media-title")
 	metaTitle := getProperty("metadata/by-key/Title")
-	metaArtist := getProperty("metadata/by-key/Artist")
-	metaAlbum := getProperty("metadata/by-key/Album")
 	if metaTitle != nil {
 		activity.Details = metaTitle.(string)
 	}
+	activity.Details = getPropertyString("filename")
 
 	// State
-	if metaArtist != nil {
-		activity.State += " by " + metaArtist.(string)
-	}
-	if metaAlbum != nil {
-		activity.State += " on " + metaAlbum.(string)
-	}
-	if activity.State == "" {
-		if aid, ok := getProperty("aid").(string); !ok || aid != "no" {
-			activity.State += "A"
-		}
-		if vid, ok := getProperty("vid").(string); !ok || vid != "no" {
-			activity.State += "V"
-		}
-		_timePos := getProperty("time-pos")
-		_duration := getProperty("duration")
-		if _timePos != nil && _duration != nil {
-			timePos := time.Unix(int64(_timePos.(float64)), 0).UTC().Format("15:04:05")
-			duration := time.Unix(int64(_duration.(float64)), 0).UTC().Format("15:04:05")
-			activity.State += fmt.Sprintf(": %s/%s", timePos, duration)
+	if pcount := getProperty("playlist-count"); pcount != nil && int(pcount.(float64)) > 1 {
+		if ppos := getProperty("playlist-pos-1"); ppos != nil {
+			activity.State = fmt.Sprintf("[%d/%d] in playlist", int(ppos.(float64)), int(pcount.(float64)))
 		}
 	}
 
@@ -96,18 +78,14 @@ func getActivity() (activity discordrpc.Activity, err error) {
 	if percentage := getProperty("percent-pos"); percentage != nil {
 		activity.SmallImageText += fmt.Sprintf(" (%d%%)", int(percentage.(float64)))
 	}
-	if pcount := getProperty("playlist-count"); pcount != nil && int(pcount.(float64)) > 1 {
-		if ppos := getProperty("playlist-pos-1"); ppos != nil {
-			activity.SmallImageText += fmt.Sprintf(" [%d/%d]", int(ppos.(float64)), int(pcount.(float64)))
-		}
-	}
 
 	// Timestamps
 	if pausing != nil && !pausing.(bool) {
 		if timeRemaining := getPropertyString("time-remaining"); timeRemaining != "" {
 			d, _ := time.ParseDuration(timeRemaining + "s")
 			endTime := time.Now().Add(d)
-			activity.Timestamps = &discordrpc.ActivityTimestamps{End: &endTime}
+			startTime := time.Now()
+			activity.Timestamps = &discordrpc.ActivityTimestamps{Start: &startTime, End: &endTime}
 		}
 	}
 	return

@@ -5,17 +5,20 @@ import (
 )
 
 type Activity struct {
+	Name           string
 	State          string
 	Details        string
 	LargeImageKey  string
 	LargeImageText string
 	SmallImageKey  string
 	SmallImageText string
+	Type           int
 
 	Party      *ActivityParty
 	Secrets    *ActivitySecrets
 	Timestamps *ActivityTimestamps
 }
+
 
 type ActivityParty struct {
 	ID         string

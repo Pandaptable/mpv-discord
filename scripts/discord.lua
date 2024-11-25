@@ -1,120 +1,152 @@
+local utils = require 'mp.utils'
 local msg = require("mp.msg")
 local opts = require("mp.options")
-local utils = require("mp.utils")
 
+-- Function to get the temporary path directory
+local function get_temp_path()
+    local dir_sep = package.config:match("([^\n]*)\n?")
+    local temp_file_path = os.tmpname()
+
+    -- Remove generated temp file
+    pcall(os.remove, temp_file_path)
+
+    local sep_idx = temp_file_path:reverse():find(dir_sep)
+    return temp_file_path:sub(1, #temp_file_path - sep_idx)
+end
+
+-- Function to join paths
+local function join_paths(...)
+    local path = ""
+    for _, v in ipairs({...}) do
+        path = utils.join_path(path, tostring(v))
+    end
+    return path
+end
+
+-- Initialize temp directory and pid
+local tempDir = get_temp_path()
+local ppid = utils.getpid()
+
+-- Create socket directory
+os.execute("mkdir " .. join_paths(tempDir, "mpvSockets") .. " 2>/dev/null")
+mp.set_property("options/input-ipc-server", join_paths(tempDir, "mpvSockets", ppid))
+
+-- Shutdown handler to remove socket on exit
+local function shutdown_handler()
+    os.remove(join_paths(tempDir, "mpvSockets", ppid))
+end
+mp.register_event("shutdown", shutdown_handler)
+
+-- Load and read configuration options
 local options = {
-	key = "D",
-	active = true,
-	client_id = "737663962677510245",
-	binary_path = "",
-	socket_path = "/tmp/mpvsocket",
-	use_static_socket_path = true,
-	autohide_threshold = 0,
+    key = "D",
+    active = true,
+    client_id = "737663962677510245",
+    binary_path = "",
+    autohide_threshold = 0,
 }
+
 opts.read_options(options, "discord")
 
+-- Validate binary path configuration
 if options.binary_path == "" then
-	msg.fatal("Missing binary path in config file.")
-	os.exit(1)
+    msg.fatal("Missing binary path in config file.")
+    os.exit(1)
 end
 
-function file_exists(path) -- fix(#23): use this instead of utils.file_info
-	local f = io.open(path, "r")
-	if f ~= nil then
-		io.close(f)
-		return true
-	else
-		return false
-	end
+-- Check if file exists
+local function file_exists(path)
+    local f = io.open(path, "r")
+    if f then
+        io.close(f)
+        return true
+    end
+    return false
 end
 
+-- Ensure binary file exists
 if not file_exists(options.binary_path) then
-	msg.fatal("The specified binary path does not exist.")
-	os.exit(1)
+    msg.fatal("The specified binary path does not exist.")
+    os.exit(1)
 end
 
+-- Print version info
 local version = "1.6.1"
 msg.info(("mpv-discord v%s by tnychn"):format(version))
 
-local socket_path = options.socket_path
-if not options.use_static_socket_path then
-	local pid = utils.getpid()
-	local filename = ("mpv-discord-%s"):format(pid)
-	if socket_path == "" then
-		socket_path = "/tmp/" -- default
-	end
-	socket_path = utils.join_path(socket_path, filename)
-elseif socket_path == "" then
-	msg.fatal("Missing socket path in config file.")
-	os.exit(1)
-end
-msg.info(("(mpv-ipc): %s"):format(socket_path))
-mp.set_property("input-ipc-server", socket_path)
+-- Define socket path
+local socket_path = join_paths(tempDir, "mpvSockets", ppid)
 
-local cmd = nil
+-- Command to start subprocess
+local cmd
 
+-- Start subprocess function
 local function start()
-	if cmd == nil then
-		cmd = mp.command_native_async({
-			name = "subprocess",
-			playback_only = false,
-			args = {
-				options.binary_path,
-				socket_path,
-				options.client_id,
-			},
-		}, function() end)
-		msg.info("launched subprocess")
-		mp.osd_message("Discord Rich Presence: Started")
-	end
+    if not cmd then
+        cmd = mp.command_native_async({
+            name = "subprocess",
+            playback_only = false,
+            args = {
+                options.binary_path,
+                socket_path,
+                options.client_id,
+            },
+        }, function() end)
+        msg.info("Launched subprocess")
+        mp.osd_message("Discord Rich Presence: Started")
+    end
 end
 
-function stop()
-	mp.abort_async_command(cmd)
-	cmd = nil
-	msg.info("aborted subprocess")
-	mp.osd_message("Discord Rich Presence: Stopped")
+-- Stop subprocess function
+local function stop()
+    if cmd then
+        mp.abort_async_command(cmd)
+        cmd = nil
+        msg.info("Aborted subprocess")
+        mp.osd_message("Discord Rich Presence: Stopped")
+    end
 end
 
+-- Register event to start on file load
 if options.active then
-	mp.register_event("file-loaded", start)
+    mp.register_event("file-loaded", start)
 end
 
+-- Keybinding to toggle Discord
 mp.add_key_binding(options.key, "toggle-discord", function()
-	if cmd ~= nil then
-		stop()
-	else
-		start()
-	end
+    if cmd then
+        stop()
+    else
+        start()
+    end
 end)
 
+-- Register shutdown handler
 mp.register_event("shutdown", function()
-	if cmd ~= nil then
-		stop()
-	end
-	if not options.use_static_socket_path then
-		os.remove(socket_path)
-	end
+    if cmd then
+        stop()
+    end
 end)
 
+-- Autohide functionality based on pause status
 if options.autohide_threshold > 0 then
-	local timer = nil
-	local t = options.autohide_threshold
-	mp.observe_property("pause", "bool", function(_, value)
-		if value == true then
-			timer = mp.add_timeout(t, function()
-				if cmd ~= nil then
-					stop()
-				end
-			end)
-		else
-			if timer ~= nil then
-				timer:kill()
-				timer = nil
-			end
-			if options.active and cmd == nil then
-				start()
-			end
-		end
-	end)
+    local timer
+    local t = options.autohide_threshold
+    mp.observe_property("pause", "bool", function(_, value)
+        if value then
+            timer = mp.add_timeout(t, function()
+                if cmd then
+                    stop()
+                end
+            end)
+        else
+            if timer then
+                timer:kill()
+                timer = nil
+            end
+            if options.active and not cmd then
+                start()
+            end
+        end
+    end)
 end

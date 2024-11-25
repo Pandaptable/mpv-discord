@@ -23,6 +23,8 @@ type Activity struct {
 }
 
 type ActivityMain struct {
+	Name    string `json:"name"`
+	Type    int    `json:"type"`
 	State   string `json:"state,omitempty"`
 	Details string `json:"details,omitempty"`
 	Assets  struct {
