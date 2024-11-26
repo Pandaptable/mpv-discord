@@ -81,21 +81,35 @@ func getActivity() (activity discordrpc.Activity, err error) {
 
 	// Timestamps
 	if pausing != nil && !pausing.(bool) {
-		if timeRemaining := getPropertyString("time-remaining"); timeRemaining != "" {
-			d, _ := time.ParseDuration(timeRemaining + "s")
-			endTime := time.Now().Add(d)
-			startTime := time.Now()
-			activity.Timestamps = &discordrpc.ActivityTimestamps{Start: &startTime, End: &endTime}
+		if timeDurationStr := getPropertyString("duration"); timeDurationStr != "" {
+			timePositionStr := getPropertyString("time-pos")
+
+			// Parse duration and time-pos as strings to float64
+			timePosition, _ := time.ParseDuration(timePositionStr + "s")
+			timeDuration, _ := time.ParseDuration(timeDurationStr + "s")
+
+			// Calculate start and end times as time.Time
+			startTime := time.Now().Add(-timePosition)
+			endTime := time.Now().Add(-timePosition + timeDuration)
+
+			// Assign to activity timestamps (convert to *time.Time)
+			activity.Timestamps = &discordrpc.ActivityTimestamps{
+				Start: &startTime,
+				End:   &endTime,
+			}
 		}
 	}
-	return
+	return activity, nil
 }
+
+
 
 func openClient() {
 	if err := client.Open(os.Args[1]); err != nil {
 		log.Fatalln(err)
 	}
 	log.Println("(mpv-ipc): connected")
+	log.Println(client.GetPropertyString("time-pos"))
 }
 
 func openPresence() {
